@@ -1,4 +1,5 @@
 use byteorder::{ByteOrder, NetworkEndian, ReadBytesExt, WriteBytesExt};
+use bytes::{Buf, Bytes};
 use log::*;
 use std::{
     borrow::Cow,
@@ -203,7 +204,7 @@ impl FrameHeader {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Frame {
     header: FrameHeader,
-    payload: Vec<u8>,
+    payload: Bytes,
 }
 
 impl Frame {
@@ -235,13 +236,13 @@ impl Frame {
 
     /// Get a reference to the frame's payload.
     #[inline]
-    pub fn payload(&self) -> &Vec<u8> {
+    pub fn payload(&self) -> &Bytes {
         &self.payload
     }
 
     /// Get a mutable reference to the frame's payload.
     #[inline]
-    pub fn payload_mut(&mut self) -> &mut Vec<u8> {
+    pub fn payload_mut(&mut self) -> &mut Bytes {
         &mut self.payload
     }
 
@@ -264,21 +265,23 @@ impl Frame {
     /// masked. In other words, those frames that have just been received from a client endpoint.
     #[inline]
     pub(crate) fn apply_mask(&mut self) {
+        let mut payload = self.payload.to_vec();
         if let Some(mask) = self.header.mask.take() {
-            apply_mask(&mut self.payload, mask)
+            apply_mask(&mut payload, mask);
+            self.payload = Bytes::from(payload);
         }
     }
 
     /// Consume the frame into its payload as binary.
     #[inline]
-    pub fn into_data(self) -> Vec<u8> {
+    pub fn into_data(self) -> Bytes {
         self.payload
     }
 
     /// Consume the frame into its payload as string.
     #[inline]
     pub fn into_string(self) -> StdResult<String, FromUtf8Error> {
-        String::from_utf8(self.payload)
+        String::from_utf8(self.payload.to_vec())
     }
 
     /// Get frame payload as `&str`.
@@ -296,8 +299,9 @@ impl Frame {
             _ => {
                 let mut data = self.payload;
                 let code = NetworkEndian::read_u16(&data[0..2]).into();
-                data.drain(0..2);
-                let text = String::from_utf8(data)?;
+                // drop the first two bytes
+                data.advance(2);
+                let text = String::from_utf8(data.to_vec())?;
                 Ok(Some(CloseFrame { code, reason: text.into() }))
             }
         }
@@ -305,15 +309,14 @@ impl Frame {
 
     /// Create a new data frame.
     #[inline]
-    pub fn message(data: Vec<u8>, opcode: OpCode, is_final: bool) -> Frame {
+    pub fn message(data: Bytes, opcode: OpCode, is_final: bool) -> Frame {
         debug_assert!(matches!(opcode, OpCode::Data(_)), "Invalid opcode for data frame.");
-
         Frame { header: FrameHeader { is_final, opcode, ..FrameHeader::default() }, payload: data }
     }
 
     /// Create a new Pong control frame.
     #[inline]
-    pub fn pong(data: Vec<u8>) -> Frame {
+    pub fn pong(data: Bytes) -> Frame {
         Frame {
             header: FrameHeader {
                 opcode: OpCode::Control(Control::Pong),
@@ -325,7 +328,7 @@ impl Frame {
 
     /// Create a new Ping control frame.
     #[inline]
-    pub fn ping(data: Vec<u8>) -> Frame {
+    pub fn ping(data: Bytes) -> Frame {
         Frame {
             header: FrameHeader {
                 opcode: OpCode::Control(Control::Ping),
@@ -342,16 +345,16 @@ impl Frame {
             let mut p = Vec::with_capacity(reason.as_bytes().len() + 2);
             p.write_u16::<NetworkEndian>(code.into()).unwrap(); // can't fail
             p.extend_from_slice(reason.as_bytes());
-            p
+            Bytes::from(p)
         } else {
-            Vec::new()
+            Bytes::new()
         };
 
         Frame { header: FrameHeader::default(), payload }
     }
 
     /// Create a frame from given header and data.
-    pub fn from_payload(header: FrameHeader, payload: Vec<u8>) -> Self {
+    pub fn from_payload(header: FrameHeader, payload: Bytes) -> Self {
         Frame { header, payload }
     }
 
@@ -456,13 +459,13 @@ mod tests {
         assert_eq!(length, 7);
         let mut payload = Vec::new();
         raw.read_to_end(&mut payload).unwrap();
-        let frame = Frame::from_payload(header, payload);
+        let frame = Frame::from_payload(header, Bytes::from(payload));
         assert_eq!(frame.into_data(), vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]);
     }
 
     #[test]
     fn format() {
-        let frame = Frame::ping(vec![0x01, 0x02]);
+        let frame = Frame::ping(Bytes::from_static(&[0x01, 0x02]));
         let mut buf = Vec::with_capacity(frame.len());
         frame.format(&mut buf).unwrap();
         assert_eq!(buf, vec![0x89, 0x02, 0x01, 0x02]);

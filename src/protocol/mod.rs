@@ -17,6 +17,7 @@ use crate::{
     error::{Error, ProtocolError, Result},
     util::NonBlockingResult,
 };
+use bytes::Bytes;
 use log::*;
 use std::{
     io::{ErrorKind as IoErrorKind, Read, Write},
@@ -434,9 +435,9 @@ impl WebSocketContext {
         let frame = match message {
             Message::Text(data) => Frame::message(data.into(), OpCode::Data(OpData::Text), true),
             Message::Binary(data) => Frame::message(data, OpCode::Data(OpData::Binary), true),
-            Message::Ping(data) => Frame::ping(data),
+            Message::Ping(data) => Frame::ping(Bytes::from(data)),
             Message::Pong(data) => {
-                self.set_additional(Frame::pong(data));
+                self.set_additional(Frame::pong(Bytes::from(data)));
                 // Note: user pongs can be user flushed so no need to flush here
                 return self._write(stream, None).map(|_| ());
             }
@@ -787,6 +788,8 @@ impl<T> CheckConnectionReset for Result<T> {
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
+
     use super::{Message, Role, WebSocket, WebSocketConfig};
     use crate::error::{CapacityError, Error};
 
@@ -817,10 +820,13 @@ mod tests {
             0x03,
         ]);
         let mut socket = WebSocket::from_raw_socket(WriteMoc(incoming), Role::Client, None);
-        assert_eq!(socket.read().unwrap(), Message::Ping(vec![1, 2]));
-        assert_eq!(socket.read().unwrap(), Message::Pong(vec![3]));
+        assert_eq!(socket.read().unwrap(), Message::Ping(Bytes::from_static(&[1, 2])));
+        assert_eq!(socket.read().unwrap(), Message::Pong(Bytes::from_static(&[3])));
         assert_eq!(socket.read().unwrap(), Message::Text("Hello, World!".into()));
-        assert_eq!(socket.read().unwrap(), Message::Binary(vec![0x01, 0x02, 0x03]));
+        assert_eq!(
+            socket.read().unwrap(),
+            Message::Binary(Bytes::from_static(&[0x01, 0x02, 0x03]))
+        );
     }
 
     #[test]

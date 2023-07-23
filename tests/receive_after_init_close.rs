@@ -48,7 +48,7 @@ fn test_receive_after_init_close() {
 
     // This read should succeed even though we already initiated a close
     let message = client_handler.read().unwrap();
-    assert_eq!(message.into_data(), b"Hello WebSocket");
+    assert_eq!(message.into_data().to_vec(), b"Hello WebSocket");
 
     assert!(client_handler.read().unwrap().is_close()); // receive acknowledgement
 

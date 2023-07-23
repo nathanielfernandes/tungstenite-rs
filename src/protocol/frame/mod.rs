@@ -10,6 +10,7 @@ use crate::{
     error::{CapacityError, Error, Result},
     Message, ReadBuffer,
 };
+use bytes::Bytes;
 use log::*;
 use std::io::{Error as IoError, ErrorKind as IoErrorKind, Read, Write};
 
@@ -181,7 +182,7 @@ impl FrameCodec {
                         if length > 0 {
                             cursor.take(length).read_to_end(&mut payload)?;
                         }
-                        break payload;
+                        break Bytes::from(payload);
                     }
                 }
             }
@@ -255,6 +256,8 @@ impl FrameCodec {
 #[cfg(test)]
 mod tests {
 
+    use bytes::Bytes;
+
     use crate::error::{CapacityError, Error};
 
     use super::{Frame, FrameSocket};
@@ -294,10 +297,10 @@ mod tests {
     fn write_frames() {
         let mut sock = FrameSocket::new(Vec::new());
 
-        let frame = Frame::ping(vec![0x04, 0x05]);
+        let frame = Frame::ping(Bytes::from_static(&[0x04, 0x05]));
         sock.send(frame).unwrap();
 
-        let frame = Frame::pong(vec![0x01]);
+        let frame = Frame::pong(Bytes::from_static(&[0x01]));
         sock.send(frame).unwrap();
 
         let (buf, _) = sock.into_inner();
